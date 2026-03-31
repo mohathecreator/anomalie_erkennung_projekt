@@ -52,8 +52,18 @@ iso_forest.fit(X_scaled)
 train_df["anomaly_score"] = iso_forest.decision_function(X_scaled)
 train_df["anomaly"] = iso_forest.predict(X_scaled)
 
+# rolling window mean logic to reduce noise and better estimate decline better
+window = 15
+train_df["score_rolling"] = train_df.groupby("unit_id")["anomaly_score"].transform(lambda x: x.rolling(window).mean())
+
+#Calculating more precisce threshold via differntial equation
+train_df["score_rolling_diff"] = train_df.groupby("unit_id")["score_rolling"].diff()
+train_df["score_rolling_diff"] = train_df.groupby("unit_id")["score_rolling_diff"].transform(lambda x: x.rolling(window).mean())
+better_th = train_df["score_rolling_diff"] 
+
+# anomaly alarm
 threshold_score = 0.0
-train_df["anomaly_flag"] = (train_df["anomaly_score"] < threshold_score).astype(int)
+train_df["anomaly_flag"] = (train_df["score_rolling_diff"] < threshold_score).astype(int)
 
 first_anomaly = (
     train_df[train_df["anomaly_flag"] == 1]
@@ -62,9 +72,9 @@ first_anomaly = (
 )
 
 print(first_anomaly.describe())
+print(better_th)
 
-unit = train_df[train_df["unit_id"] ==1].sort_values("cycles")
-
+"""
 fig, axes = plt.subplots(5, 2, figsize=(14, 18), sharex=False)
 
 for i, unit_id in enumerate(range(1, 6)):
@@ -74,5 +84,14 @@ for i, unit_id in enumerate(range(1, 6)):
     axes[i][1].plot(unit["cycles"], unit["anomaly_score"])
     axes[i][1].set_ylabel("Anomaly Score")
 
-plt.tight_layout()
+    plt.tight_layout()
+"""
+
+# Plot
+unit = train_df[train_df["unit_id"] ==1].sort_values("cycles")
+
+fig, ax = plt.subplots()
+ax.plot(unit["cycles"], unit["score_rolling_diff"])
+ax.plot(unit["cycles"], unit["score_rolling"])
+ax.plot(unit["cycles"], unit["anomaly_score"])
 plt.show()
