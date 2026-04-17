@@ -52,6 +52,7 @@ train_df[useful_sensors] = X_scaled
 
 def create_sequences(df, window_size, features):
     x = []
+    labels = []
 
     for unit_id in df["unit_id"].unique():
         unit = df[df["unit_id"] == unit_id].sort_values("cycles")
@@ -60,8 +61,9 @@ def create_sequences(df, window_size, features):
         for i in range(len(unit_values) - window_size +1):
             window = unit_values[i:i + window_size]
             x.append(window)
+            labels.append((unit_id, unit["cycles"].values[i + window_size -1]))
 
-    return np.array(x)
+    return np.array(x), np.array(labels)
 
 healthy_filter = train_df["cycles"] <= train_df["max_cycle"] * 0.3
 healthy_df = train_df[healthy_filter]
@@ -88,7 +90,7 @@ optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
 
 window_size = 30
 
-X_sequences = create_sequences(healthy_df, window_size, useful_sensors)
+X_sequences, _ = create_sequences(healthy_df, window_size, useful_sensors)
 X_tensor = torch.FloatTensor(X_sequences)
 
 dataset = TensorDataset(X_tensor, X_tensor)
@@ -107,3 +109,45 @@ for epoch in range(epochs):
         optimizer.step()
     avg_loss = total_loss / len(loader)
     print(f"Epoch {epoch+1}, Loss: {avg_loss:.4f}")
+
+model.eval()
+all_sequences, labels = create_sequences(train_df, window_size, useful_sensors)
+all_tensor = torch.FloatTensor(all_sequences)
+
+
+with torch.no_grad():
+    reconstructed = model(all_tensor)
+    reconstruction_error = torch.mean((all_tensor - reconstructed) ** 2, dim=(1, 2)) # MSE
+
+reconstruction_error = reconstruction_error.numpy()
+
+results_df = pd.DataFrame(labels, columns=["unit_id", "cycle"])
+results_df["reconstruction_error"] = reconstruction_error
+results_df = results_df.merge(train_df[["unit_id", "cycles", "RUL"]], left_on=["unit_id", "cycle"], right_on=["unit_id", "cycles"])
+
+anomaly_flag = results_df["reconstruction_error"] > 0.3
+results_df["anomaly_flag"] = anomaly_flag
+
+first_anomaly = (
+    results_df[results_df["anomaly_flag"] == 1]
+    .groupby("unit_id")["RUL"]
+    .max()  # max RUL beim ersten Alarm = wie früh wird erkannt
+)
+
+print(first_anomaly.describe())
+
+fig, axes = plt.subplots(5, 2, figsize=(14, 18), sharex=False)
+
+for i, unit_id in enumerate(range(1, 6)):
+    unit = results_df[results_df["unit_id"] == unit_id].sort_values("cycles")
+    axes[i][0].plot(unit["cycles"], unit["RUL"])
+    axes[i][0].set_ylabel(f"Unit {unit_id} RUL")
+    axes[i][1].plot(unit["cycles"], unit["reconstruction_error"])
+    axes[i][1].set_ylabel("Reconstruction Error")
+
+    plt.tight_layout()
+plt.show()
+
+first_anomaly.hist(bins=20)
+plt.xlabel("RUL beim ersten Alarm")
+plt.show()

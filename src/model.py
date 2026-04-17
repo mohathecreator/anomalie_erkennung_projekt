@@ -84,7 +84,7 @@ first_anomaly = (
 
 print(first_anomaly.describe())
 
-"""
+
 fig, axes = plt.subplots(5, 2, figsize=(14, 18), sharex=False)
 
 for i, unit_id in enumerate(range(1, 6)):
@@ -95,4 +95,4 @@ for i, unit_id in enumerate(range(1, 6)):
     axes[i][1].set_ylabel("Anomaly Score")
 
     plt.tight_layout()
-"""
+plt.show()
