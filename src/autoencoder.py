@@ -2,8 +2,10 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
-from sklearn.ensemble import IsolationForest
 from sklearn.preprocessing import StandardScaler
+import torch
+from torch import nn
+from torch.utils.data import DataLoader, TensorDataset
 
 def read_data(file_path):
     """Reads data from CSV file and returns a DataFrame.""" 
@@ -46,53 +48,62 @@ train_df["RUL"] = train_df["max_cycle"] - train_df["cycles"]
 
 scaler = StandardScaler()
 X_scaled = scaler.fit_transform(train_df[useful_sensors])
+train_df[useful_sensors] = X_scaled
 
-iso_forest = IsolationForest(n_estimators=100, contamination=0.05, max_samples=256, random_state=42)
-iso_forest.fit(X_scaled)
-train_df["anomaly_score"] = iso_forest.decision_function(X_scaled)
-train_df["anomaly"] = iso_forest.predict(X_scaled)
+def create_sequences(df, window_size, features):
+    x = []
 
-# rolling window mean logic to reduce noise and better estimate decline better
-window = 15
-train_df["score_rolling"] = train_df.groupby("unit_id")["anomaly_score"].transform(lambda x: x.rolling(window).mean())
+    for unit_id in df["unit_id"].unique():
+        unit = df[df["unit_id"] == unit_id].sort_values("cycles")
+        unit_values = unit[features].values
 
-# Filter healthy cycles to later calculate mean and variance for threshold
+        for i in range(len(unit_values) - window_size +1):
+            window = unit_values[i:i + window_size]
+            x.append(window)
+
+    return np.array(x)
+
 healthy_filter = train_df["cycles"] <= train_df["max_cycle"] * 0.3
-healthy_cycles = train_df[healthy_filter]
+healthy_df = train_df[healthy_filter]
 
-healthy_cycles_mean = healthy_cycles.groupby("unit_id")["score_rolling"].mean()
-healthy_cycles_mean = healthy_cycles_mean.reset_index()
-healthy_cycles_mean.columns = ["unit_id", "score_mean"]
-train_df = train_df.merge(healthy_cycles_mean, on="unit_id")
+class LSTMAutoencoder(nn.Module):
+    def __init__(self, input_size, hidden_size):
+        super().__init__()
+        self.encoder = nn.LSTM(input_size, hidden_size, batch_first=True)
+        self.decoder = nn.LSTM(hidden_size, hidden_size, batch_first=True)
+        self.output_layer = nn.Linear(hidden_size, input_size)
 
-healthy_cycles_std = healthy_cycles.groupby("unit_id")["score_rolling"].std()
-healthy_cycles_std = healthy_cycles_std.reset_index()
-healthy_cycles_std.columns = ["unit_id", "score_std"]
-train_df = train_df.merge(healthy_cycles_std, on="unit_id")
+    def forward(self, x):
+        _, (hidden, _) = self.encoder(x)
+        hidden = hidden.permute(1, 0, 2)
+        hidden = hidden.repeat(1, 30, 1)
+        output, _ = self.decoder(hidden)
+        return self.output_layer(output)
 
-score_normalized = (train_df["score_rolling"] - train_df["score_mean"]) / train_df["score_std"]
-train_df["score_normalized"] = score_normalized
+model = LSTMAutoencoder(input_size=14, hidden_size=32)
 
-anomaly_flag = train_df["score_normalized"] < -2
-train_df["anomaly_flag"] = anomaly_flag
+criterion = nn.MSELoss()
+optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
 
-first_anomaly = (
-    train_df[train_df["anomaly_flag"] == 1]
-    .groupby("unit_id")["RUL"]
-    .max()  # max RUL beim ersten Alarm = wie früh wird erkannt
-)
 
-print(first_anomaly.describe())
+window_size = 30
 
-"""
-fig, axes = plt.subplots(5, 2, figsize=(14, 18), sharex=False)
+X_sequences = create_sequences(healthy_df, window_size, useful_sensors)
+X_tensor = torch.FloatTensor(X_sequences)
 
-for i, unit_id in enumerate(range(1, 6)):
-    unit = train_df[train_df["unit_id"] == unit_id].sort_values("cycles")
-    axes[i][0].plot(unit["cycles"], unit["RUL"])
-    axes[i][0].set_ylabel(f"Unit {unit_id} RUL")
-    axes[i][1].plot(unit["cycles"], unit["anomaly_score"])
-    axes[i][1].set_ylabel("Anomaly Score")
+dataset = TensorDataset(X_tensor, X_tensor)
+loader = DataLoader(dataset, batch_size=32, shuffle=True)
 
-    plt.tight_layout()
-"""
+epochs = 50
+
+for epoch in range(epochs):
+    total_loss = 0
+    for x_batch, y_batch in loader:
+        output = model(x_batch)
+        loss = criterion(output, y_batch)
+        optimizer.zero_grad()
+        loss.backward()
+        total_loss += loss.item()
+        optimizer.step()
+    avg_loss = total_loss / len(loader)
+    print(f"Epoch {epoch+1}, Loss: {avg_loss:.4f}")
