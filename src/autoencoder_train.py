@@ -2,7 +2,10 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
+from itertools import product
 from sklearn.preprocessing import StandardScaler
+from sklearn.metrics import f1_score
+from sklearn.metrics import precision_score, recall_score
 import torch
 from torch import nn
 from torch.utils.data import DataLoader, TensorDataset
@@ -69,8 +72,9 @@ healthy_filter = train_df["cycles"] <= train_df["max_cycle"] * 0.3
 healthy_df = train_df[healthy_filter]
 
 class LSTMAutoencoder(nn.Module):
-    def __init__(self, input_size, hidden_size):
+    def __init__(self, input_size, hidden_size, seq_len):
         super().__init__()
+        self.seq_len = seq_len
         self.encoder = nn.LSTM(input_size, hidden_size, batch_first=True)
         self.decoder = nn.LSTM(hidden_size, hidden_size, batch_first=True)
         self.output_layer = nn.Linear(hidden_size, input_size)
@@ -78,55 +82,130 @@ class LSTMAutoencoder(nn.Module):
     def forward(self, x):
         _, (hidden, _) = self.encoder(x)
         hidden = hidden.permute(1, 0, 2)
-        hidden = hidden.repeat(1, 30, 1)
+        hidden = hidden.repeat(1, self.seq_len, 1)
         output, _ = self.decoder(hidden)
         return self.output_layer(output)
 
-model = LSTMAutoencoder(input_size=14, hidden_size=32)
 
-criterion = nn.MSELoss()
-optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+def run_pipeline(df, healthy_subset, features, window_size, hidden_size, lr, epochs, threshold):
+    torch.manual_seed(42)
+
+    model = LSTMAutoencoder(input_size=len(features), hidden_size=hidden_size, seq_len=window_size)
+    criterion = nn.MSELoss()
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+
+    X_sequences, _ = create_sequences(healthy_subset, window_size, features)
+    if len(X_sequences) == 0:
+        return None
+
+    X_tensor = torch.FloatTensor(X_sequences)
+    dataset = TensorDataset(X_tensor, X_tensor)
+    loader = DataLoader(dataset, batch_size=32, shuffle=True)
+
+    for _ in range(epochs):
+        for x_batch, y_batch in loader:
+            output = model(x_batch)
+            loss = criterion(output, y_batch)
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+
+    model.eval()
+    all_sequences, labels = create_sequences(df, window_size, features)
+    if len(all_sequences) == 0:
+        return None
+
+    all_tensor = torch.FloatTensor(all_sequences)
+    with torch.no_grad():
+        reconstructed = model(all_tensor)
+        reconstruction_error = torch.mean((all_tensor - reconstructed) ** 2, dim=(1, 2))
+
+    run_results = pd.DataFrame(labels, columns=["unit_id", "cycle"])
+    run_results["reconstruction_error"] = reconstruction_error.numpy()
+    run_results = run_results.merge(
+        df[["unit_id", "cycles", "RUL"]],
+        left_on=["unit_id", "cycle"],
+        right_on=["unit_id", "cycles"],
+    )
+    run_results["anomaly_flag"] = run_results["reconstruction_error"] > threshold
+    return run_results
 
 
-window_size = 30
+param_grid = {
+    "window_size": [20, 30],
+    "hidden_size": [16, 32],
+    "lr": [0.001, 0.0005],
+    "epochs": [30, 50],
+    "threshold": [0.2, 0.3, 0.4],
+}
 
-X_sequences, _ = create_sequences(healthy_df, window_size, useful_sensors)
-X_tensor = torch.FloatTensor(X_sequences)
+search_results = []
+best_result = None
+best_results_df = None
 
-dataset = TensorDataset(X_tensor, X_tensor)
-loader = DataLoader(dataset, batch_size=32, shuffle=True)
+for window_size, hidden_size, lr, epochs, threshold in product(
+    param_grid["window_size"],
+    param_grid["hidden_size"],
+    param_grid["lr"],
+    param_grid["epochs"],
+    param_grid["threshold"],
+):
+    candidate_df = run_pipeline(
+        train_df,
+        healthy_df,
+        useful_sensors,
+        window_size,
+        hidden_size,
+        lr,
+        epochs,
+        threshold,
+    )
+    if candidate_df is None:
+        continue
 
-epochs = 50
+    y_true = (candidate_df["RUL"] <= 30).astype(int)
+    y_pred = candidate_df["anomaly_flag"].astype(int)
 
-for epoch in range(epochs):
-    total_loss = 0
-    for x_batch, y_batch in loader:
-        output = model(x_batch)
-        loss = criterion(output, y_batch)
-        optimizer.zero_grad()
-        loss.backward()
-        total_loss += loss.item()
-        optimizer.step()
-    avg_loss = total_loss / len(loader)
-    print(f"Epoch {epoch+1}, Loss: {avg_loss:.4f}")
+    precision = precision_score(y_true, y_pred, zero_division=0)
+    recall = recall_score(y_true, y_pred, zero_division=0)
+    f1 = f1_score(y_true, y_pred, zero_division=0)
 
-model.eval()
-all_sequences, labels = create_sequences(train_df, window_size, useful_sensors)
-all_tensor = torch.FloatTensor(all_sequences)
+    row = {
+        "window_size": window_size,
+        "hidden_size": hidden_size,
+        "lr": lr,
+        "epochs": epochs,
+        "threshold": threshold,
+        "precision": precision,
+        "recall": recall,
+        "f1": f1,
+    }
+    search_results.append(row)
 
+    if best_result is None or (f1, recall, precision) > (
+        best_result["f1"],
+        best_result["recall"],
+        best_result["precision"],
+    ):
+        best_result = row
+        best_results_df = candidate_df
 
-with torch.no_grad():
-    reconstructed = model(all_tensor)
-    reconstruction_error = torch.mean((all_tensor - reconstructed) ** 2, dim=(1, 2)) # MSE
+results_overview_df = pd.DataFrame(search_results).sort_values(
+    by=["f1", "recall", "precision"], ascending=False
+)
+print("Top 10 Gridsearch-Ergebnisse:")
+print(results_overview_df.head(10).to_string(index=False))
 
-reconstruction_error = reconstruction_error.numpy()
+print("\nBeste Parameter:")
+print(
+    f"window_size={best_result['window_size']}, "
+    f"hidden_size={best_result['hidden_size']}, "
+    f"lr={best_result['lr']}, "
+    f"epochs={best_result['epochs']}, "
+    f"threshold={best_result['threshold']}"
+)
 
-results_df = pd.DataFrame(labels, columns=["unit_id", "cycle"])
-results_df["reconstruction_error"] = reconstruction_error
-results_df = results_df.merge(train_df[["unit_id", "cycles", "RUL"]], left_on=["unit_id", "cycle"], right_on=["unit_id", "cycles"])
-
-anomaly_flag = results_df["reconstruction_error"] > 0.3
-results_df["anomaly_flag"] = anomaly_flag
+results_df = best_results_df
 
 first_anomaly = (
     results_df[results_df["anomaly_flag"] == 1]
@@ -135,6 +214,12 @@ first_anomaly = (
 )
 
 print(first_anomaly.describe())
+
+y_true = (results_df["RUL"] <= 30).astype(int)
+y_pred = (results_df["anomaly_flag"]).astype(int)
+
+print(f"Precision: {precision_score(y_true, y_pred)}, Recall: {recall_score(y_true, y_pred)}")
+print(f"F1: {f1_score(y_true, y_pred)}")
 
 fig, axes = plt.subplots(5, 2, figsize=(14, 18), sharex=False)
 
