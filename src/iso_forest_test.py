@@ -30,9 +30,12 @@ sensor_cols = ["sensor_1", "sensor_2", "sensor_3", "sensor_4",
 #Change file path, according your own path
 train_path = r"C:\Programmieren\anomalie_erkennung_projekt\data\train\train_FD001.txt"
 test_path = r"C:\Programmieren\anomalie_erkennung_projekt\data\test\test_FD001.txt"
+rul_path = r"C:\Programmieren\anomalie_erkennung_projekt\data\RUL\RUL_FD001.txt"
 
 train_df = read_data(train_path)
 test_df = read_data(test_path)
+rul_df = pd.read_csv(rul_path, header=None, names=["RUL"])
+rul_df["unit_id"] = rul_df.index + 1
 
 threshold = 0.01
 # useful sensors whose standard deviation is less than the threshold, which means they are constant and produce noise for model
@@ -46,11 +49,15 @@ train_df["RUL"] = train_df["max_cycle"] - train_df["cycles"]
 
 scaler = StandardScaler()
 X_scaled = scaler.fit_transform(train_df[useful_sensors])
+X_test_scaled = scaler.transform(test_df[useful_sensors])
+train_df[useful_sensors] = X_scaled
+test_df[useful_sensors] = X_test_scaled
 
 iso_forest = IsolationForest(n_estimators=100, contamination=0.05, max_samples=256, random_state=42)
 iso_forest.fit(X_scaled)
 train_df["anomaly_score"] = iso_forest.decision_function(X_scaled)
 train_df["anomaly"] = iso_forest.predict(X_scaled)
+test_df["anomaly_score"] = iso_forest.decision_function(X_test_scaled)
 
 # rolling window mean logic to reduce noise and better estimate decline better
 window = 15
@@ -82,7 +89,35 @@ first_anomaly = (
     .max()  # max RUL beim ersten Alarm = wie früh wird erkannt
 )
 
+print("Training Data - First Anomaly Detection:")
 print(first_anomaly.describe())
+
+# Test Data Processing
+window = 15
+test_df["score_rolling"] = test_df.groupby("unit_id")["anomaly_score"].transform(lambda x: x.rolling(window).mean())
+
+# Merge training statistics (score_mean and score_std) into test_df
+test_df = test_df.merge(healthy_cycles_mean, on="unit_id")
+test_df = test_df.merge(healthy_cycles_std, on="unit_id")
+
+# Calculate normalized score using training statistics
+score_normalized_test = (test_df["score_rolling"] - test_df["score_mean"]) / test_df["score_std"]
+test_df["score_normalized"] = score_normalized_test
+
+# Set anomaly flag
+anomaly_flag_test = test_df["score_normalized"] < -2
+test_df["anomaly_flag"] = anomaly_flag_test
+
+# Merge RUL data for test set
+test_df = test_df.merge(rul_df, on="unit_id")
+
+# Count units with anomalies
+units_with_alarm = test_df[test_df["anomaly_flag"] == 1]["unit_id"].nunique()
+print(f"\nTest Data - Units with Alarm: {units_with_alarm}")
+
+# Evaluate anomaly detection per unit
+anomaly_per_unit = test_df[test_df["anomaly_flag"] == 1].groupby("unit_id").size()
+print(f"Anomalies per Unit:\n{anomaly_per_unit}")
 
 
 fig, axes = plt.subplots(5, 2, figsize=(14, 18), sharex=False)
@@ -96,3 +131,10 @@ for i, unit_id in enumerate(range(1, 6)):
 
     plt.tight_layout()
 plt.show()
+
+alarmed_units = test_df[test_df["anomaly_flag"] == 1]["unit_id"].unique()
+print("RUL der Units MIT Alarm:")
+print(rul_df[rul_df["unit_id"].isin(alarmed_units)]["RUL"].describe())
+
+print("RUL der Units OHNE Alarm:")
+print(rul_df[~rul_df["unit_id"].isin(alarmed_units)]["RUL"].describe())
