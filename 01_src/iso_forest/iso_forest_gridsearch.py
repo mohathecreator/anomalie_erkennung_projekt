@@ -1,15 +1,19 @@
 import sys
-sys.path.append(r"C:\Programmieren\anomalie_erkennung_projekt\src")
+from pathlib import Path
+
+# Add 01_src to import path so sibling modules like data_utils are resolvable.
+PROJECT_SRC_DIR = Path(__file__).resolve().parents[1]
+if str(PROJECT_SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(PROJECT_SRC_DIR))
+
 from data_utils import read_data, sensor_cols
-from iso_forest_model import run_pipeline
+from iso_forest_model import fit_pipeline
 import pandas as pd
-import numpy as np
 from itertools import product
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import f1_score, precision_score, recall_score
 
-train_path = r"C:\Programmieren\anomalie_erkennung_projekt\data\train\train_FD001.txt"
-
+train_path = r"02_data\train\train_FD001.txt"
 train_df = read_data(train_path)
 
 threshold_std = 0.01
@@ -44,7 +48,15 @@ for n_estimators, contamination, max_samples, window, z_threshold in product(
     param_grid["window"],
     param_grid["z_threshold"],
 ):
-    candidate_df = run_pipeline(train_df, X_scaled, n_estimators, contamination, max_samples, window, z_threshold)
+    candidate_df, _, _, _ = fit_pipeline(
+        train_df,
+        X_scaled,
+        n_estimators,
+        contamination,
+        max_samples,
+        window,
+        z_threshold,
+    )
 
     y_pred = candidate_df["anomaly_flag"].astype(int)
     precision = precision_score(y_true, y_pred, zero_division=0)

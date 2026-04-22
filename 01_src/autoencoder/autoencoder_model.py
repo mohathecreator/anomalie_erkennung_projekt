@@ -35,7 +35,7 @@ class LSTMAutoencoder(nn.Module):
 
 
 def fit_pipeline(df, healthy_subset, features, window_size, hidden_size, lr, epochs, threshold,
-                 patience=5, min_delta=1e-4):
+                patience=5, min_delta=1e-4):
     torch.manual_seed(42)
 
     model = LSTMAutoencoder(input_size=len(features), hidden_size=hidden_size, seq_len=window_size)

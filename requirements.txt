@@ -1,7 +1,5 @@
 pandas
 scikit-learn
 matplotlib
-seaborn
 torch
 numpy
-pyod

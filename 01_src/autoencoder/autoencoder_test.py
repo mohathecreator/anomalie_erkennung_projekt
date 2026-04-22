@@ -1,14 +1,18 @@
 import sys
-sys.path.append(r"C:\Programmieren\anomalie_erkennung_projekt\src")
+from pathlib import Path
+
+PROJECT_SRC_DIR = Path(__file__).resolve().parents[1]
+if str(PROJECT_SRC_DIR) not in sys.path:
+	sys.path.insert(0, str(PROJECT_SRC_DIR))
+
 from data_utils import read_data, sensor_cols
 from autoencoder_model import fit_pipeline, predict_pipeline
 import pandas as pd
-import numpy as np
 from sklearn.preprocessing import StandardScaler
 
-train_path = r"data\train\train_FD001.txt"
-test_path = r"data\test\test_FD001.txt"
-rul_path = r"data\RUL\RUL_FD001.txt"
+train_path = r"02_data\train\train_FD001.txt"
+test_path = r"02_data\test\test_FD001.txt"
+rul_path = r"02_data\RUL\RUL_FD001.txt"
 
 train_df = read_data(train_path)
 test_df = read_data(test_path)
