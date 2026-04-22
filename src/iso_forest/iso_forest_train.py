@@ -46,13 +46,13 @@ print(first_anomaly.describe())
 print(f"Precision: {precision_score(y_true, y_pred)}, Recall: {recall_score(y_true, y_pred)}")
 print(f"F1: {f1_score(y_true, y_pred)}")
 
-fig, axes = plt.subplots(5, 2, figsize=(14, 18), sharex=False)
+fig, axes = plt.subplots(2, 5, figsize=(20, 8), sharex=False)
 for i, unit_id in enumerate(range(1, 6)):
     unit = train_df[train_df["unit_id"] == unit_id].sort_values("cycles")
-    axes[i][0].plot(unit["cycles"], unit["RUL"])
-    axes[i][0].set_ylabel(f"Unit {unit_id} RUL")
-    axes[i][1].plot(unit["cycles"], unit["anomaly_score"])
-    axes[i][1].set_ylabel("Anomaly Score")
+    axes[0][i].plot(unit["cycles"], unit["RUL"])
+    axes[0][i].set_ylabel(f"Unit {unit_id} RUL")
+    axes[1][i].plot(unit["cycles"], unit["anomaly_score"])
+    axes[1][i].set_ylabel("Anomaly Score")
 
 plt.tight_layout()
 plt.savefig("iso_forest_rul_vs_score.png", dpi=150, bbox_inches="tight")
