@@ -53,8 +53,6 @@ python 01_src/autoencoder/autoencoder_gridsearch.py
 NASA C-MAPSS (Commercial Modular Aero-Propulsion System Simulation) FD001.
 Verfügbar unter: https://www.nasa.gov/intelligent-systems-division/discovery-and-systems-health/pcoe/pcoe-data-set-repository/
 
-Saxena, A., Goebel, K., Simon, D. und Eklund, N., "Damage Propagation Modeling for Aircraft Engine Run-to-Failure Simulation", Proc. IEEE IPHM, 2008.
-
 ## Abhängigkeiten
 
 - Python 3.14
