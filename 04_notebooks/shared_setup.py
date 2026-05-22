@@ -52,5 +52,6 @@ def alarm_analysis(results_df, rul_df):
     print(f"Units mit Alarm: {len(alarmed)} / {n_total}")
     print("\nRUL-Verteilung (MIT Alarm):")
     print(rul_df[rul_df["unit_id"].isin(alarmed)]["RUL"].describe().round(1))
+    print(f"Units ohne Alarm: {n_total - len(alarmed)} / {n_total}")
     print("\nRUL-Verteilung (OHNE Alarm):")
     print(rul_df[~rul_df["unit_id"].isin(alarmed)]["RUL"].describe().round(1))
