@@ -61,4 +61,3 @@ Verfügbar unter: https://www.nasa.gov/intelligent-systems-division/discovery-an
 - scikit-learn
 - torch (PyTorch 2.10)
 - matplotlib
-- seaborn

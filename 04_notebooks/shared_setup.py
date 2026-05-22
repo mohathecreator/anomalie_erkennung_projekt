@@ -40,7 +40,7 @@ def load_and_prepare():
 
 def evaluate(y_true, y_pred, label=""):
     if label:
-        print(f"--- {label} ---")
+        print(f"{label}:")
     print(f"Precision: {precision_score(y_true, y_pred, zero_division=0):.4f}")
     print(f"Recall:    {recall_score(y_true, y_pred, zero_division=0):.4f}")
     print(f"F1:        {f1_score(y_true, y_pred, zero_division=0):.4f}")

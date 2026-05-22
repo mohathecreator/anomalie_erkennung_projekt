@@ -48,7 +48,8 @@ first_anomaly = (
 )
 
 print(first_anomaly.describe())
-print(f"Precision: {precision_score(y_true, y_pred)}, Recall: {recall_score(y_true, y_pred)}")
+print(f"Precision: {precision_score(y_true, y_pred)}")
+print(f"Recall: {recall_score(y_true, y_pred)}")
 print(f"F1: {f1_score(y_true, y_pred)}")
 
 fig, axes = plt.subplots(2, 5, figsize=(20, 8), sharex=False)
