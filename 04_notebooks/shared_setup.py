@@ -48,10 +48,7 @@ def evaluate(y_true, y_pred, label=""):
 
 def alarm_analysis(results_df, rul_df):
     alarmed = results_df[results_df["anomaly_flag"] == 1]["unit_id"].unique()
-    n_total = rul_df["unit_id"].nunique()
-    print(f"Units mit Alarm: {len(alarmed)} / {n_total}")
     print("\nRUL-Verteilung (MIT Alarm):")
     print(rul_df[rul_df["unit_id"].isin(alarmed)]["RUL"].describe().round(1))
-    print(f"Units ohne Alarm: {n_total - len(alarmed)} / {n_total}")
     print("\nRUL-Verteilung (OHNE Alarm):")
     print(rul_df[~rul_df["unit_id"].isin(alarmed)]["RUL"].describe().round(1))
